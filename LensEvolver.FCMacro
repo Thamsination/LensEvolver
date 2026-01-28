@@ -1,0 +1,58 @@
+"""
+LensEvolver - Modular Lens Optimizer for FreeCAD
+=================================================
+
+This macro launches the modular Lens Optimizer / Raytracing Analysis tool.
+
+Usage:
+    1. Select objects in this order:
+       - LED Source (point/sphere for position)
+       - Envelope Solid (maximum lens volume)
+       - Absorber Geometry (target surface)
+       - Centerline Sketch (OPTIONAL - auto-extracted if not provided)
+    2. Run this macro
+    3. Configure settings in the dialog
+    4. Click Start to begin optimization
+
+The modular package is located at:
+    <FreeCAD Macro folder>/LensOptimizerModules/
+
+Author: AI Assistant
+Version: 2.0.0
+"""
+
+__Name__ = "LensEvolver"
+__Comment__ = "Modular Lens Optimizer / Raytracing Analysis"
+__Author__ = "AI Assistant"
+__Version__ = "2.0.0"
+__Date__ = "2026-01-27"
+__License__ = "MIT"
+__Web__ = ""
+__Wiki__ = ""
+__Icon__ = ""
+__Help__ = "Select LED, Envelope, Absorber (and optionally Centerline), then run macro"
+__Status__ = "Stable"
+__Requires__ = "FreeCAD >= 0.19"
+__Communication__ = ""
+
+import FreeCAD
+import sys
+import os
+
+# Ensure the Macro folder is in the Python path
+macro_path = os.path.dirname(os.path.abspath(__file__))
+if macro_path not in sys.path:
+    sys.path.insert(0, macro_path)
+
+# Import and run the modular lens optimizer
+try:
+    from LensOptimizerModules import main
+    main()  # main is already the function, not the module
+except ImportError as e:
+    FreeCAD.Console.PrintError(f"Failed to import LensOptimizerModules: {e}\n")
+    FreeCAD.Console.PrintError("Please ensure the LensOptimizerModules folder exists in:\n")
+    FreeCAD.Console.PrintError(f"  {macro_path}\n")
+except Exception as e:
+    FreeCAD.Console.PrintError(f"Error running LensEvolver: {e}\n")
+    import traceback
+    traceback.print_exc()
