@@ -227,7 +227,28 @@ def _run_raytracer_via_server(lens_stl_path, absorber_stl_path, led_pos, led_dir
         
         absorber_exits = result.get('absorber_exits', [])
         statistics = result.get('statistics', {})
+        diagnostics = result.get('diagnostics', None)
         
+        # Print diagnostics if available
+        if diagnostics:
+            FreeCAD.Console.PrintMessage("\n=== PATH LENGTH ANALYSIS ===\n")
+            FreeCAD.Console.PrintMessage(f"  Total lens path:     {diagnostics.get('total_lens_path_mm', 0):.1f} mm (avg {diagnostics.get('avg_lens_path_mm', 0):.2f} mm/ray)\n")
+            FreeCAD.Console.PrintMessage(f"  Total absorber path: {diagnostics.get('total_absorber_path_mm', 0):.1f} mm (avg {diagnostics.get('avg_absorber_path_mm', 0):.2f} mm/ray)\n")
+            FreeCAD.Console.PrintMessage(f"  Total air path:      {diagnostics.get('total_air_path_mm', 0):.1f} mm\n")
+            
+            FreeCAD.Console.PrintMessage("\n=== ABSORPTION ANALYSIS ===\n")
+            FreeCAD.Console.PrintMessage(f"  Lens absorption coeff:     {diagnostics.get('lens_absorption_coeff', 0):.4f} /mm\n")
+            FreeCAD.Console.PrintMessage(f"  Absorber absorption coeff: {diagnostics.get('absorber_absorption_coeff', 0):.4f} /mm\n")
+            FreeCAD.Console.PrintMessage(f"  Avg lens transmission:     {diagnostics.get('lens_transmission_pct', 0):.1f}% (per ray avg path)\n")
+            FreeCAD.Console.PrintMessage(f"  Avg absorber transmission: {diagnostics.get('absorber_transmission_pct', 0):.1f}% (per ray avg path)\n")
+            
+            FreeCAD.Console.PrintMessage("\n=== POWER BUDGET (from raytracer) ===\n")
+            FreeCAD.Console.PrintMessage(f"  Initial total power:  {diagnostics.get('initial_total_power_mW', 0):.2f} mW\n")
+            FreeCAD.Console.PrintMessage(f"  Fresnel losses:       {diagnostics.get('fresnel_loss_mW', 0):.2f} mW ({diagnostics.get('fresnel_loss_pct', 0):.1f}%)\n")
+            FreeCAD.Console.PrintMessage(f"  Lens exit power:      {diagnostics.get('lens_exit_power_mW', 0):.2f} mW ({diagnostics.get('lens_exit_power_pct', 0):.1f}%)\n")
+            FreeCAD.Console.PrintMessage(f"  Final absorber power: {diagnostics.get('final_absorber_power_mW', 0):.2f} mW ({diagnostics.get('final_absorber_power_pct', 0):.1f}%)\n")
+        
+        # Process absorber exits
         exit_positions = []
         exit_intensities = []
         
@@ -236,16 +257,30 @@ def _run_raytracer_via_server(lens_stl_path, absorber_stl_path, led_pos, led_dir
                 exit_positions.append(exit_data.get('end', [0, 0, 0]))
                 exit_intensities.append(exit_data.get('intensity', 1.0))
         
+        # Process lens exits for heatmap
+        lens_exits = result.get('lens_exits', [])
+        lens_exit_positions = []
+        lens_exit_intensities = []
+        
+        for exit_data in lens_exits:
+            if isinstance(exit_data, dict):
+                lens_exit_positions.append(exit_data.get('end', [0, 0, 0]))
+                lens_exit_intensities.append(exit_data.get('intensity', 1.0))
+        
         # Build the response in the expected format
         converted_result = {
             'success': True,
             'exit_positions': np.array(exit_positions) if exit_positions else np.array([]).reshape(0, 3),
             'exit_intensities': np.array(exit_intensities) if exit_intensities else np.array([]),
+            'lens_exit_positions': np.array(lens_exit_positions) if lens_exit_positions else np.array([]).reshape(0, 3),
+            'lens_exit_intensities': np.array(lens_exit_intensities) if lens_exit_intensities else np.array([]),
             'lens_hits': statistics.get('lens_entries', statistics.get('initial_rays', 0)),
+            'lens_exits_count': statistics.get('lens_exits', len(lens_exit_positions)),
             'absorber_entries': statistics.get('absorber_entries', 0),  # Rays that entered absorber
             'absorber_exits': statistics.get('absorber_exits', len(exit_positions)),
             'total_segments': statistics.get('total_segments', 0),
             'initial_rays': statistics.get('initial_rays', 0),
+            'diagnostics': diagnostics,  # Pass through for further analysis
         }
         
         return converted_result

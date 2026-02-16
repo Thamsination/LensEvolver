@@ -31,16 +31,17 @@ from .materials import (
 MATERIAL_PRESETS = {
     'lens': {
         'ZEONEX K26R (COP)': {'n': 1.535, 'abs': 0.001, 'desc': 'Cyclo Olefin Polymer - excellent UV transmission'},
-        'TOPAS 5013L-10 (COC)': {'n': 1.533, 'abs': 0.002, 'desc': 'Cyclic Olefin Copolymer - good UV transmission'},
+        'TOPAS 5013S-04 (COC)': {'n': 1.53, 'abs': 0.002, 'desc': 'TOPAS COC medical grade - n=1.53 (brochure), excellent optical, biocompatible'},
         'Fused Silica': {'n': 1.458, 'abs': 0.0001, 'desc': 'Quartz glass - superior UV transmission'},
         'PMMA (Acrylic)': {'n': 1.49, 'abs': 0.015, 'desc': 'Standard acrylic - good UV transmission'},
         'Polycarbonate': {'n': 1.585, 'abs': 0.05, 'desc': 'PC - high impact, moderate UV absorption'},
+        'TRIREX 3020MD (PC)': {'n': 1.585, 'abs': 0.63, 'desc': 'Samyang TRIREX - polycarbonate, standard absorber'},
         'ETFE (Fluoropolymer)': {'n': 1.38, 'abs': 0.002, 'desc': 'Low refractive index - promotes side exit'},
         'Silicone (Optical)': {'n': 1.41, 'abs': 0.003, 'desc': 'Flexible, low n - good for diffuse exit'},
         'Custom': {'n': 1.5, 'abs': 0.01, 'desc': 'User-defined values'},
     },
     'absorber': {
-        'TRIREX 3020MD (PC)': {'n': 1.585, 'abs': 0.05, 'desc': 'Polycarbonate - standard absorber'},
+        'TRIREX 3020MD (PC)': {'n': 1.585, 'abs': 0.63, 'desc': 'Polycarbonate - standard absorber'},
         'Black PMMA': {'n': 1.49, 'abs': 0.1, 'desc': 'Black acrylic - high absorption'},
         'Absorbing Silicone': {'n': 1.41, 'abs': 0.08, 'desc': 'Flexible absorber'},
         'Custom': {'n': 1.5, 'abs': 0.05, 'desc': 'User-defined values'},
@@ -390,13 +391,13 @@ def show_compute_budget_dialog() -> Optional[Dict]:
     lens_abs_spin.setToolTip("Lens absorption coefficient per mm")
     mat_grid.addWidget(lens_abs_spin, 1, 3)
     
-    # --- Absorber Material ---
+    # --- Absorber Material --- (same presets as lens for consistency)
     mat_grid.addWidget(QtWidgets.QLabel("Absorber Material:"), 2, 0)
     absorber_mat_combo = QtWidgets.QComboBox()
-    for name in MATERIAL_PRESETS['absorber'].keys():
+    for name in MATERIAL_PRESETS['lens'].keys():
         absorber_mat_combo.addItem(name, name)
-    absorber_mat_combo.setCurrentIndex(0)  # Default to TRIREX 3020MD
-    absorber_mat_combo.setToolTip("Select absorber material preset or choose Custom")
+    absorber_mat_combo.setCurrentIndex(0)  # Default to ZEONEX K26R (same as lens)
+    absorber_mat_combo.setToolTip("Select absorber material preset (same options as lens) or choose Custom")
     mat_grid.addWidget(absorber_mat_combo, 2, 1, 1, 3)
     
     mat_grid.addWidget(QtWidgets.QLabel("n:"), 3, 0)
@@ -430,7 +431,7 @@ def show_compute_budget_dialog() -> Optional[Dict]:
     def update_absorber_material():
         mat_name = absorber_mat_combo.currentData()
         if mat_name and mat_name != 'Custom':
-            props = MATERIAL_PRESETS['absorber'][mat_name]
+            props = MATERIAL_PRESETS['lens'][mat_name]
             absorber_n_spin.setValue(props['n'])
             absorber_abs_spin.setValue(props['abs'])
     

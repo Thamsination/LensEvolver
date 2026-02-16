@@ -75,7 +75,7 @@ def main():
                 
                 FreeCAD.Console.PrintMessage("\nCreating heatmap visualizations...\n")
                 
-                # Create heatmap for LED 1
+                # Create heatmap for LED 1 absorber exits
                 led1_exits = analysis_result.get('led1_exits', {})
                 if len(led1_exits.get('positions', [])) > 0:
                     heatmap1 = create_wavelength_heatmap(
@@ -87,7 +87,19 @@ def main():
                     if heatmap1:
                         FreeCAD.Console.PrintMessage(f"  LED 1 heatmap created: {heatmap1.Label}\n")
                 
-                # Create heatmap for LED 2
+                # Create heatmap for LED 1 lens exits
+                led1_lens_exits = analysis_result.get('led1_lens_exits', {})
+                if len(led1_lens_exits.get('positions', [])) > 0:
+                    lens_heatmap1 = create_wavelength_heatmap(
+                        doc, result_group,
+                        led1_lens_exits,
+                        "LED1_LensExit",
+                        stats['num_rays']
+                    )
+                    if lens_heatmap1:
+                        FreeCAD.Console.PrintMessage(f"  LED 1 lens exit heatmap created: {lens_heatmap1.Label}\n")
+                
+                # Create heatmap for LED 2 absorber exits
                 led2_exits = analysis_result.get('led2_exits', {})
                 if len(led2_exits.get('positions', [])) > 0:
                     heatmap2 = create_wavelength_heatmap(
@@ -98,6 +110,18 @@ def main():
                     )
                     if heatmap2:
                         FreeCAD.Console.PrintMessage(f"  LED 2 heatmap created: {heatmap2.Label}\n")
+                
+                # Create heatmap for LED 2 lens exits
+                led2_lens_exits = analysis_result.get('led2_lens_exits', {})
+                if len(led2_lens_exits.get('positions', [])) > 0:
+                    lens_heatmap2 = create_wavelength_heatmap(
+                        doc, result_group,
+                        led2_lens_exits,
+                        "LED2_LensExit",
+                        stats['num_rays']
+                    )
+                    if lens_heatmap2:
+                        FreeCAD.Console.PrintMessage(f"  LED 2 lens exit heatmap created: {lens_heatmap2.Label}\n")
                         
             except Exception as e:
                 FreeCAD.Console.PrintWarning(f"Could not create heatmap: {e}\n")
@@ -261,9 +285,74 @@ def main():
         cold_zones = len(grid_analysis.get('cold_zones', []))
         FreeCAD.Console.PrintMessage(f"  Hot Zones: {hot_zones}\n")
         FreeCAD.Console.PrintMessage(f"  Cold Zones: {cold_zones}\n")
+        
+        # Power budget verification
+        integrated_power_raw = grid_analysis.get('integrated_power_raw', 0)
+        total_area_cm2 = grid_analysis.get('total_area_cm2', 0)
+        num_rays = stats.get('num_rays', 1)
+        led_power_mW = stats.get('led1_power_mW', 1420.0)
+        efficiency = stats.get('best_efficiency', 0)
+        
+        if num_rays > 0 and integrated_power_raw > 0:
+            implied_power_mW = integrated_power_raw / num_rays
+            expected_power_mW = efficiency * led_power_mW
+            
+            FreeCAD.Console.PrintMessage(f"\nPower Budget Check:\n")
+            FreeCAD.Console.PrintMessage(f"  Implied power on absorber: {implied_power_mW:.2f} mW\n")
+            FreeCAD.Console.PrintMessage(f"  Expected (efficiency * LED): {expected_power_mW:.2f} mW\n")
+            FreeCAD.Console.PrintMessage(f"  Total illuminated area: {total_area_cm2:.4f} cm²\n")
+            
+            if expected_power_mW > 0:
+                ratio = implied_power_mW / expected_power_mW
+                if abs(ratio - 1.0) > 0.05:  # >5% mismatch
+                    FreeCAD.Console.PrintWarning(f"  WARNING: Power budget mismatch ({ratio:.2f}x)\n")
+    
+    # Probe-equivalent irradiance (for comparison to physical measurements)
+    best_result = stats.get('best_result')
+    if best_result is not None and grid_analysis is not None:
+        try:
+            from .uniformity_analysis import calculate_probe_irradiance
+            import numpy as np
+            
+            # Get combined exit data
+            led1_exits = best_result.get('led1_exits', {})
+            led2_exits = best_result.get('led2_exits', {})
+            
+            positions_list = []
+            intensities_list = []
+            
+            if len(led1_exits.get('positions', [])) > 0:
+                positions_list.append(np.array(led1_exits['positions']))
+                intensities_list.append(np.array(led1_exits['intensities']))
+            if len(led2_exits.get('positions', [])) > 0:
+                positions_list.append(np.array(led2_exits['positions']))
+                intensities_list.append(np.array(led2_exits['intensities']))
+            
+            if positions_list:
+                all_positions = np.vstack(positions_list)
+                all_intensities = np.concatenate(intensities_list)
+                num_rays = stats.get('num_rays', 1000)
+                
+                # Calculate probe irradiance at center of illuminated area
+                bounds = grid_analysis.get('bounds', (0, 0, 0, 0))
+                center_x = (bounds[0] + bounds[1]) / 2
+                center_y = (bounds[2] + bounds[3]) / 2
+                
+                probe_result = calculate_probe_irradiance(
+                    all_positions, all_intensities,
+                    center_x, center_y,
+                    probe_diameter_mm=0.4,
+                    num_rays=num_rays
+                )
+                
+                FreeCAD.Console.PrintMessage(f"\nProbe-Equivalent Irradiance (0.4mm aperture at center):\n")
+                FreeCAD.Console.PrintMessage(f"  Irradiance: {probe_result['irradiance_mW_cm2']:.4f} mW/cm²\n")
+                FreeCAD.Console.PrintMessage(f"  Rays in probe: {probe_result['num_rays_in_probe']}\n")
+        except Exception as e:
+            FreeCAD.Console.PrintWarning(f"Could not compute probe irradiance: {e}\n")
     
     # Create heatmap visualization for best result (separate per LED)
-    best_result = stats.get('best_result')
+    best_result = stats.get('best_result')  # Re-get in case it was modified
     if best_result is not None and grid_analysis is not None:
         try:
             from .visualization import create_wavelength_heatmap

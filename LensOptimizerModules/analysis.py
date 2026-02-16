@@ -162,20 +162,28 @@ def analyze_lens(led_obj, lens_obj, absorber_obj,
             FreeCAD.Console.PrintError("Raytracing failed for LED 1!\n")
             return None
         
-        # Structure LED 1 results
+        # Structure LED 1 results (absorber exits)
         led1_exits = {
             'positions': np.array(led1_result.get('exit_positions', [])),
             'intensities': np.array(led1_result.get('exit_intensities', [])),
             'wavelength': led_wavelength
         }
         
-        FreeCAD.Console.PrintMessage(f"  LED 1: {len(led1_exits['positions'])} absorber exits\n")
+        # Structure LED 1 lens exits for heatmap
+        led1_lens_exits = {
+            'positions': np.array(led1_result.get('lens_exit_positions', [])),
+            'intensities': np.array(led1_result.get('lens_exit_intensities', [])),
+            'wavelength': led_wavelength
+        }
+        
+        FreeCAD.Console.PrintMessage(f"  LED 1: {len(led1_exits['positions'])} absorber exits, {len(led1_lens_exits['positions'])} lens exits\n")
         
         if progress:
             progress.setValue(50)
         
         # Run raytracing for LED 2 if configured
         led2_exits = {'positions': np.array([]), 'intensities': np.array([]), 'wavelength': None}
+        led2_lens_exits = {'positions': np.array([]), 'intensities': np.array([]), 'wavelength': None}
         led2_result = None
         
         if led2_config is not None:
@@ -215,7 +223,12 @@ def analyze_lens(led_obj, lens_obj, absorber_obj,
                             'intensities': np.array(led2_result.get('exit_intensities', [])),
                             'wavelength': led2_wavelength
                         }
-                        FreeCAD.Console.PrintMessage(f"  LED 2: {len(led2_exits['positions'])} absorber exits\n")
+                        led2_lens_exits = {
+                            'positions': np.array(led2_result.get('lens_exit_positions', [])),
+                            'intensities': np.array(led2_result.get('lens_exit_intensities', [])),
+                            'wavelength': led2_wavelength
+                        }
+                        FreeCAD.Console.PrintMessage(f"  LED 2: {len(led2_exits['positions'])} absorber exits, {len(led2_lens_exits['positions'])} lens exits\n")
         
         if progress:
             progress.setValue(80)
@@ -280,6 +293,8 @@ def analyze_lens(led_obj, lens_obj, absorber_obj,
         'exit_intensities': combined_intensities,
         'led1_exits': led1_exits,
         'led2_exits': led2_exits,
+        'led1_lens_exits': led1_lens_exits,
+        'led2_lens_exits': led2_lens_exits,
         'led1_result': led1_result,
         'led2_result': led2_result,
     }
@@ -322,6 +337,47 @@ def analyze_lens(led_obj, lens_obj, absorber_obj,
         FreeCAD.Console.PrintMessage(f"  Min:  {grid_analysis.get('min_intensity', 0):.4f} mW/cm²\n")
         FreeCAD.Console.PrintMessage(f"  Hot Zones: {len(grid_analysis.get('hot_zones', []))}\n")
         FreeCAD.Console.PrintMessage(f"  Cold Zones: {len(grid_analysis.get('cold_zones', []))}\n")
+        
+        # Power budget verification
+        integrated_power_raw = grid_analysis.get('integrated_power_raw', 0)
+        total_area_cm2 = grid_analysis.get('total_area_cm2', 0)
+        
+        if total_rays > 0 and integrated_power_raw > 0:
+            implied_power_mW = integrated_power_raw / total_rays
+            expected_power_mW = efficiency * led_power_mW
+            
+            FreeCAD.Console.PrintMessage(f"\nPower Budget Check:\n")
+            FreeCAD.Console.PrintMessage(f"  Implied power on absorber: {implied_power_mW:.2f} mW\n")
+            FreeCAD.Console.PrintMessage(f"  Expected (efficiency * LED): {expected_power_mW:.2f} mW\n")
+            FreeCAD.Console.PrintMessage(f"  Total illuminated area: {total_area_cm2:.4f} cm²\n")
+            
+            if expected_power_mW > 0:
+                ratio = implied_power_mW / expected_power_mW
+                if abs(ratio - 1.0) > 0.05:  # >5% mismatch
+                    FreeCAD.Console.PrintWarning(f"  WARNING: Power budget mismatch ({ratio:.2f}x)\n")
+        
+        # Probe-equivalent irradiance (for comparison to physical measurements)
+        if len(combined_positions) > 0:
+            try:
+                from .uniformity_analysis import calculate_probe_irradiance
+                
+                # Calculate probe irradiance at center of illuminated area
+                bounds = grid_analysis.get('bounds', (0, 0, 0, 0))
+                center_x = (bounds[0] + bounds[1]) / 2
+                center_y = (bounds[2] + bounds[3]) / 2
+                
+                probe_result = calculate_probe_irradiance(
+                    combined_positions, combined_intensities,
+                    center_x, center_y,
+                    probe_diameter_mm=0.4,
+                    num_rays=total_rays
+                )
+                
+                FreeCAD.Console.PrintMessage(f"\nProbe-Equivalent Irradiance (0.4mm aperture at center):\n")
+                FreeCAD.Console.PrintMessage(f"  Irradiance: {probe_result['irradiance_mW_cm2']:.4f} mW/cm²\n")
+                FreeCAD.Console.PrintMessage(f"  Rays in probe: {probe_result['num_rays_in_probe']}\n")
+            except Exception as e:
+                FreeCAD.Console.PrintWarning(f"Could not compute probe irradiance: {e}\n")
     
     FreeCAD.Console.PrintMessage("="*70 + "\n")
     

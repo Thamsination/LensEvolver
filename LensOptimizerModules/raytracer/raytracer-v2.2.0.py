@@ -951,7 +951,19 @@ class UVLEDRayTracer:
         return fig
 
     def simulate(self, num_rays=10000, max_bounces=1000):
-        """Run ray tracing simulation with proper refraction"""
+        """Run ray tracing simulation with proper refraction.
+        
+        Intensity convention:
+            Each ray is initialized with intensity = led_source.power (mW).
+            After bouncing, intensities decrease due to absorption and Fresnel losses.
+            Exit intensities are in mW. To get total power on absorber:
+                total_power_mW = sum(exit_intensities) / num_rays
+            This should equal efficiency * led_power_mW (power budget).
+        
+        Returns:
+            ray_paths: List of dicts with 'start', 'end', 'intensity', 'bounce', 'is_exit'
+            intensities: Final intensity array (for rays still active)
+        """
         if self.ray_tracer is None:
             raise ValueError("Geometry not loaded.")
         
@@ -959,6 +971,13 @@ class UVLEDRayTracer:
         
         ray_origins, ray_directions = self.generate_led_rays(num_rays)
         ray_paths = []
+        
+        # Intensity convention: Each ray carries the full LED power (mW).
+        # Downstream, irradiance is normalized by num_rays so that:
+        #   - integrated_power = sum(exit_intensities) / num_rays  [mW]
+        #   - This equals efficiency * led_power when power is conserved.
+        # This allows irradiance (mW/cm²) to be computed as:
+        #   grid_intensities / cell_area_cm2 / num_rays
         intensities = np.ones(num_rays) * self.led_source.power
         ray_in_material = np.zeros(num_rays, dtype=bool)
         

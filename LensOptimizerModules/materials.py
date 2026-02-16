@@ -30,11 +30,13 @@ LENS_ABSORPTION_COEFF = 0.001  # Very low UV absorption for COP
 # Properties:
 #   - Refractive index: ~1.585 (typical for PC)
 #   - Specific gravity: 1.20
-#   - Higher UV absorption than COP
+#   - High UV absorption at 405nm (measured: 85% loss through 3mm)
 #   - Good mechanical properties
+# Note: Absorption coefficient measured at 405nm using Thorlabs PM140-16.
+#       PC is NOT suitable for UV lightpipe applications due to high absorption.
 ABSORBER_MATERIAL_NAME = "TRIREX 3020MD (PC)"
 ABSORBER_REFRACTIVE_INDEX = 1.585
-ABSORBER_ABSORPTION_COEFF = 0.05  # Moderate absorption for polycarbonate
+ABSORBER_ABSORPTION_COEFF = 0.63  # Measured at 405nm: -ln(6/40)/3mm = 0.63/mm
 
 # ============================================================================
 # LEGACY DEFAULTS (for backward compatibility)

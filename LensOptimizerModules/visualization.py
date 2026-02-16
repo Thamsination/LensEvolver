@@ -175,7 +175,7 @@ def create_heatmap_visualization(doc, parent_group, exit_positions, exit_intensi
         
         # Create heatmap group with mean irradiance in name
         mean_irr = grid_analysis.get('mean_intensity', 0)
-        heatmap_group = doc.addObject("App::DocumentObjectGroup", f"Heatmap_{mean_irr:.1f}mWcm2")
+        heatmap_group = doc.addObject("App::DocumentObjectGroup", f"Heatmap_{mean_irr:.3f}mWcm2")
         parent_group.addObject(heatmap_group)
         
         def get_heatmap_color(normalized_value):
@@ -230,7 +230,7 @@ def create_heatmap_visualization(doc, parent_group, exit_positions, exit_intensi
                 
                 # Label with average irradiance in mW/cm² (like original)
                 avg_irradiance = np.mean(bin_irradiances)
-                obj_name = f"Irradiance_{avg_irradiance:.1f}mWcm2"
+                obj_name = f"Irradiance_{avg_irradiance:.3f}mWcm2"
                 bin_obj = doc.addObject("Part::Feature", obj_name)
                 bin_obj.Shape = compound
                 bin_obj.ViewObject.PointSize = 4.0
@@ -485,7 +485,7 @@ def create_wavelength_heatmap(doc, parent_group, led_exits, led_name, num_rays):
             if vertices:
                 compound = Compound(vertices)
                 avg_irradiance = np.mean(bin_energies)
-                obj = doc.addObject("Part::Feature", f"Heatmap_{wavelength}nm_{avg_irradiance:.1f}mWcm2")
+                obj = doc.addObject("Part::Feature", f"Heatmap_{wavelength}nm_{avg_irradiance:.3f}mWcm2")
                 obj.Shape = compound
                 obj.ViewObject.PointColor = color
                 obj.ViewObject.PointSize = 6.0

@@ -408,6 +408,14 @@ class UVLEDRayTracerWithAbsorber(UVLEDRayTracer):
         absorber_exit_count = 0
         lens_exit_count = 0
         
+        # Path length and absorption tracking
+        total_lens_path_length = 0.0
+        total_absorber_path_length = 0.0
+        total_air_path_length = 0.0
+        initial_total_power = np.sum(intensities)
+        initial_num_rays = num_rays  # Save original count
+        fresnel_loss_total = 0.0
+        
         for bounce in range(max_bounces):
             # Print progress every 10 bounces to reduce console spam
             if bounce % 10 == 0 or bounce < 5:
@@ -421,15 +429,25 @@ class UVLEDRayTracerWithAbsorber(UVLEDRayTracer):
                 ray_origins, ray_directions
             )
             
-            # Apply material absorption for distance traveled
-            for i in range(num_rays):
-                if hit_triangle_ids[i] >= 0:
-                    distance = hit_distances[i]
-                    state = ray_material_state[i]
-                    if state == 1:  # In lens
-                        intensities[i] *= np.exp(-self.material.absorption_coeff * distance)
-                    elif state == 2:  # In absorber
-                        intensities[i] *= np.exp(-self.absorber_material.absorption_coeff * distance)
+            # Apply material absorption for distance traveled (fully vectorized for performance)
+            valid_hits = hit_triangle_ids >= 0
+            if np.any(valid_hits):
+                # Track path lengths by material (vectorized)
+                air_mask = valid_hits & (ray_material_state == 0)
+                lens_mask = valid_hits & (ray_material_state == 1)
+                absorber_mask = valid_hits & (ray_material_state == 2)
+                
+                total_air_path_length += float(np.sum(hit_distances[air_mask]))
+                total_lens_path_length += float(np.sum(hit_distances[lens_mask]))
+                total_absorber_path_length += float(np.sum(hit_distances[absorber_mask]))
+                
+                # Apply absorption (fully vectorized - much faster than loop)
+                # Lens absorption
+                if np.any(lens_mask):
+                    intensities[lens_mask] *= np.exp(-self.material.absorption_coeff * hit_distances[lens_mask])
+                # Absorber absorption
+                if np.any(absorber_mask):
+                    intensities[absorber_mask] *= np.exp(-self.absorber_material.absorption_coeff * hit_distances[absorber_mask])
             
             new_origins = []
             new_directions = []
@@ -532,6 +550,7 @@ class UVLEDRayTracerWithAbsorber(UVLEDRayTracer):
                     'intensity': float(intensities[i]),
                     'bounce': bounce,
                     'is_exit': is_lens_exit,
+                    'is_lens_exit': is_lens_exit,  # Explicit lens exit flag
                     'is_absorber_hit': False,
                     'is_absorber_exit': is_absorber_exit,
                     'is_absorber_entry': is_absorber_entry
@@ -549,6 +568,8 @@ class UVLEDRayTracerWithAbsorber(UVLEDRayTracer):
                 # === NOW decide ray continuation ===
                 if np.random.random() < reflectance or refracted_dir is None:
                     # Reflection (or total internal reflection)
+                    # Track Fresnel loss: ray loses (1-R) of its energy
+                    fresnel_loss_total += float(intensities[i] * (1 - reflectance))
                     if reflected_dir is not None:
                         reflected_dir = np.asarray(reflected_dir, dtype=np.float32).flatten()
                         if reflected_dir.shape[0] == 3:
@@ -562,6 +583,8 @@ class UVLEDRayTracerWithAbsorber(UVLEDRayTracer):
                             new_material_states.append(int(current_state))  # Stay in same material
                 else:
                     # Refraction - ray continues into new medium
+                    # Track Fresnel loss: ray loses R of its energy
+                    fresnel_loss_total += float(intensities[i] * reflectance)
                     refracted_dir = np.asarray(refracted_dir, dtype=np.float32).flatten()
                     if refracted_dir.shape[0] == 3:
                         # Apply small offset along new direction to prevent self-intersection
@@ -605,10 +628,65 @@ class UVLEDRayTracerWithAbsorber(UVLEDRayTracer):
         lens_exits = sum(1 for r in ray_paths if r.get('is_exit', False) and not r.get('is_absorber_exit', False))
         absorber_exits = sum(1 for r in ray_paths if r.get('is_absorber_exit', False))
         
-        print(f"Simulation complete. Traced {len(ray_paths)} ray segments.")
+        # Calculate final power on absorber exits and lens exits
+        absorber_exit_rays = [r for r in ray_paths if r.get('is_absorber_exit', False)]
+        final_absorber_power = sum(r.get('intensity', 0) for r in absorber_exit_rays)
+        
+        lens_exit_rays = [r for r in ray_paths if r.get('is_lens_exit', False)]
+        final_lens_exit_power = sum(r.get('intensity', 0) for r in lens_exit_rays)
+        
+        # Calculate absorption losses (use initial ray count for averages)
+        avg_lens_path = total_lens_path_length / initial_num_rays if initial_num_rays > 0 else 0
+        avg_absorber_path = total_absorber_path_length / initial_num_rays if initial_num_rays > 0 else 0
+        
+        # Theoretical absorption loss based on path lengths (Beer-Lambert)
+        lens_transmission = np.exp(-self.material.absorption_coeff * avg_lens_path) if avg_lens_path > 0 else 1.0
+        absorber_transmission = np.exp(-self.absorber_material.absorption_coeff * avg_absorber_path) if avg_absorber_path > 0 else 1.0
+        
+        print(f"\nSimulation complete. Traced {len(ray_paths)} ray segments.")
         print(f"  Lens exits: {lens_exits}")
         print(f"  Absorber entries: {absorber_entry_count}")
         print(f"  Absorber exits (EFFICIENCY METRIC): {absorber_exits}")
+        
+        print(f"\n  === PATH LENGTH ANALYSIS ===")
+        print(f"  Total lens path:     {total_lens_path_length:.1f} mm (avg {avg_lens_path:.2f} mm/ray)")
+        print(f"  Total absorber path: {total_absorber_path_length:.1f} mm (avg {avg_absorber_path:.2f} mm/ray)")
+        print(f"  Total air path:      {total_air_path_length:.1f} mm")
+        
+        print(f"\n  === ABSORPTION ANALYSIS ===")
+        print(f"  Lens absorption coeff:     {self.material.absorption_coeff:.4f} /mm")
+        print(f"  Absorber absorption coeff: {self.absorber_material.absorption_coeff:.4f} /mm")
+        print(f"  Avg lens transmission:     {lens_transmission*100:.1f}% (per ray avg path)")
+        print(f"  Avg absorber transmission: {absorber_transmission*100:.1f}% (per ray avg path)")
+        
+        print(f"\n  === POWER BUDGET ===")
+        print(f"  Initial total power:  {initial_total_power:.2f} mW")
+        print(f"  Fresnel losses:       {fresnel_loss_total:.2f} mW ({fresnel_loss_total/initial_total_power*100:.1f}%)")
+        print(f"  Lens exit power:      {final_lens_exit_power:.2f} mW ({final_lens_exit_power/initial_total_power*100:.1f}%)")
+        print(f"  Final absorber power: {final_absorber_power:.2f} mW ({final_absorber_power/initial_total_power*100:.1f}%)")
+        
+        # Store diagnostics for external access
+        self.diagnostics = {
+            'total_lens_path_mm': total_lens_path_length,
+            'total_absorber_path_mm': total_absorber_path_length,
+            'total_air_path_mm': total_air_path_length,
+            'avg_lens_path_mm': avg_lens_path,
+            'avg_absorber_path_mm': avg_absorber_path,
+            'lens_absorption_coeff': self.material.absorption_coeff,
+            'absorber_absorption_coeff': self.absorber_material.absorption_coeff,
+            'lens_transmission_pct': lens_transmission * 100,
+            'absorber_transmission_pct': absorber_transmission * 100,
+            'initial_total_power_mW': initial_total_power,
+            'fresnel_loss_mW': fresnel_loss_total,
+            'fresnel_loss_pct': fresnel_loss_total / initial_total_power * 100 if initial_total_power > 0 else 0,
+            'lens_exit_power_mW': final_lens_exit_power,
+            'lens_exit_power_pct': final_lens_exit_power / initial_total_power * 100 if initial_total_power > 0 else 0,
+            'lens_exit_count': len(lens_exit_rays),
+            'final_absorber_power_mW': final_absorber_power,
+            'final_absorber_power_pct': final_absorber_power / initial_total_power * 100 if initial_total_power > 0 else 0,
+            'initial_num_rays': initial_num_rays,
+            'absorber_exit_count': len(absorber_exit_rays),
+        }
         
         return ray_paths, intensities
 

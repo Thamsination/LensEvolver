@@ -232,6 +232,9 @@ def process_request(request):
             max_ray_length=max_ray_length
         )
         
+        # Get diagnostics if available
+        diagnostics = getattr(tracer, 'diagnostics', None)
+        
         # OPTIMIZATION #3: Minimal response mode
         # Only process and return what's needed for fitness calculation
         if minimal_response:
@@ -242,6 +245,7 @@ def process_request(request):
                 # Pre-extract all data into numpy arrays ONCE (avoid repeated dict access)
                 bounces = np.array([p.get('bounce', 0) for p in ray_paths], dtype=np.int32)
                 is_exit = np.array([p.get('is_exit', False) for p in ray_paths], dtype=bool)
+                is_lens_exit = np.array([p.get('is_lens_exit', False) for p in ray_paths], dtype=bool)
                 is_absorber_hit = np.array([p.get('is_absorber_hit', False) for p in ray_paths], dtype=bool)
                 is_absorber_entry = np.array([p.get('is_absorber_entry', False) for p in ray_paths], dtype=bool)
                 is_absorber_exit = np.array([p.get('is_absorber_exit', False) for p in ray_paths], dtype=bool)
@@ -251,6 +255,7 @@ def process_request(request):
                 lens_entries = int(np.sum(bounces == 1))  # First hit on lens
                 max_bounce = int(np.max(bounces)) if len(bounces) > 0 else 0
                 exit_segments = int(np.sum(is_exit))
+                lens_exits_total = int(np.sum(is_lens_exit))
                 absorber_hits_total = int(np.sum(is_absorber_hit))
                 absorber_entries_total = int(np.sum(is_absorber_entry))
                 absorber_exits_total = int(np.sum(is_absorber_exit))
@@ -269,26 +274,45 @@ def process_request(request):
                         'end': end,
                         'intensity': float(path.get('intensity', 1.0))
                     })
+                
+                # Extract lens exits for heatmap visualization
+                lens_exit_indices = np.where(is_lens_exit)[0]
+                lens_exits = []
+                for idx in lens_exit_indices:
+                    path = ray_paths[idx]
+                    end = path['end']
+                    if isinstance(end, np.ndarray):
+                        end = end.tolist()
+                    elif not isinstance(end, list):
+                        end = list(end)
+                    lens_exits.append({
+                        'end': end,
+                        'intensity': float(path.get('intensity', 1.0))
+                    })
             else:
                 initial_rays = 0
                 lens_entries = 0
                 max_bounce = 0
                 exit_segments = 0
+                lens_exits_total = 0
                 absorber_hits_total = 0
                 absorber_entries_total = 0
                 absorber_exits_total = 0
                 absorber_exits = []
+                lens_exits = []
             
             response = {
                 'success': True,
                 'minimal_response': True,
                 'absorber_exits': absorber_exits,
+                'lens_exits': lens_exits,
                 'ray_paths': [],  # Empty in minimal mode
                 'hit_points': [],  # Empty in minimal mode
                 'statistics': {
                     'total_segments': total_segments,
                     'initial_rays': initial_rays,
                     'lens_entries': lens_entries,
+                    'lens_exits': lens_exits_total,
                     'exit_segments': exit_segments,
                     'hit_points_count': 0,
                     'absorber_hits': absorber_hits_total,
@@ -297,7 +321,8 @@ def process_request(request):
                     'max_bounce': max_bounce,
                     'cache_hits': _cache_hits,
                     'cache_misses': _cache_misses,
-                }
+                },
+                'diagnostics': diagnostics
             }
         else:
             # Full response mode (for visualization, debugging)
@@ -366,7 +391,8 @@ def process_request(request):
                     'max_bounce': max((p.get('bounce', 0) for p in processed_paths), default=0),
                     'cache_hits': _cache_hits,
                     'cache_misses': _cache_misses,
-                }
+                },
+                'diagnostics': diagnostics
             }
         
         elapsed = time.time() - start_time

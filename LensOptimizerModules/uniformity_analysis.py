@@ -11,14 +11,31 @@ import numpy as np
 def analyze_uniformity_grid(exit_positions, exit_intensities, grid_size=10, num_rays=None):
     """Analyze uniformity using a grid approach.
     
+    Intensity convention:
+        The raytracer assigns each ray the full LED power (mW) at emission.
+        Exit intensities are in mW (after absorption/Fresnel losses).
+        Irradiance (mW/cm²) = grid_intensities / cell_area_cm2 / num_rays.
+        
+        This normalization ensures that:
+        - integrated_power_raw / num_rays = total power on absorber (mW)
+        - This should equal efficiency * led_power_mW (power budget check)
+    
     Args:
-        exit_positions: Nx3 array of positions
-        exit_intensities: N array of intensities
+        exit_positions: Nx3 array of positions (mm)
+        exit_intensities: N array of intensities (mW, each ray carries led_power initially)
         grid_size: Number of cells per dimension
         num_rays: Total number of rays simulated (for normalizing power distribution)
         
     Returns:
-        dict with grid analysis results including irradiance in mW/cm²
+        dict with grid analysis results:
+            - grid_counts, grid_intensities: raw grid data
+            - uniformity_index: 0-1 (1 = perfect uniformity)
+            - mean/max/min_intensity: irradiance in mW/cm²
+            - hot_zones, cold_zones: cells with >20% deviation from mean
+            - bounds: (x_min, x_max, y_min, y_max) in mm
+            - total_area_cm2: total illuminated area (x_range * y_range / 100)
+            - integrated_power_raw: sum(exit_intensities), for power budget check
+            - num_exits: number of exit rays
     """
     if len(exit_positions) == 0:
         return {
@@ -29,7 +46,11 @@ def analyze_uniformity_grid(exit_positions, exit_intensities, grid_size=10, num_
             'cold_zones': [],
             'mean_intensity': 0,
             'max_intensity': 0,
-            'min_intensity': 0
+            'min_intensity': 0,
+            'bounds': (0, 0, 0, 0),
+            'total_area_cm2': 0,
+            'integrated_power_raw': 0,
+            'num_exits': 0
         }
     
     # If num_rays not provided, use exit count as fallback
@@ -106,6 +127,11 @@ def analyze_uniformity_grid(exit_positions, exit_intensities, grid_size=10, num_
                         'deficit': 1 - grid_intensities[i, j] / mean_intensity
                     })
     
+    # Power budget fields
+    total_area_cm2 = (x_range * y_range) / 100.0  # mm² to cm²
+    integrated_power_raw = np.sum(exit_intensities)  # sum of all exit ray intensities (mW units)
+    num_exits = len(exit_positions)
+    
     return {
         'grid_counts': grid_counts,
         'grid_intensities': grid_intensities,
@@ -115,7 +141,70 @@ def analyze_uniformity_grid(exit_positions, exit_intensities, grid_size=10, num_
         'mean_intensity': mean_intensity,
         'max_intensity': max_intensity,
         'min_intensity': min_intensity,
-        'bounds': (x_min, x_max, y_min, y_max)
+        'bounds': (x_min, x_max, y_min, y_max),
+        'total_area_cm2': total_area_cm2,
+        'integrated_power_raw': integrated_power_raw,
+        'num_exits': num_exits
+    }
+
+
+def calculate_probe_irradiance(exit_positions, exit_intensities, center_x, center_y,
+                                probe_diameter_mm=0.4, num_rays=None):
+    """Calculate irradiance as measured by a circular probe at a given position.
+    
+    This allows direct comparison between simulation and measurements from
+    a fiber-coupled power meter (e.g., Thorlabs PM140-16 with 400um fiber).
+    
+    Args:
+        exit_positions: Nx3 array of exit positions (mm)
+        exit_intensities: N array of intensities (mW, each ray carries led_power)
+        center_x, center_y: Probe center position (mm)
+        probe_diameter_mm: Probe aperture diameter (default 0.4 mm for 400um fiber)
+        num_rays: Total rays simulated (for normalization). If None, uses len(exit_positions).
+    
+    Returns:
+        dict with:
+            - irradiance_mW_cm2: Irradiance in mW/cm² (same convention as grid analysis)
+            - power_mW: Total power collected by probe (mW)
+            - num_rays_in_probe: Number of exit rays within probe aperture
+            - probe_area_cm2: Probe collection area (cm²)
+    """
+    if len(exit_positions) == 0:
+        return {
+            'irradiance_mW_cm2': 0,
+            'power_mW': 0,
+            'num_rays_in_probe': 0,
+            'probe_area_cm2': 0
+        }
+    
+    if num_rays is None:
+        num_rays = len(exit_positions)
+    
+    # Probe area
+    probe_radius_mm = probe_diameter_mm / 2.0
+    probe_area_mm2 = np.pi * probe_radius_mm ** 2
+    probe_area_cm2 = probe_area_mm2 / 100.0
+    
+    # Find rays within probe aperture
+    x = exit_positions[:, 0]
+    y = exit_positions[:, 1]
+    distances = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+    in_probe = distances <= probe_radius_mm
+    
+    # Sum intensities of rays in probe
+    intensity_sum = np.sum(exit_intensities[in_probe]) if np.any(in_probe) else 0
+    num_rays_in_probe = np.sum(in_probe)
+    
+    # Irradiance using same convention as grid analysis:
+    # irradiance = intensity_sum / area / num_rays
+    irradiance_mW_cm2 = (intensity_sum / probe_area_cm2 / num_rays) if num_rays > 0 else 0
+    power_mW = intensity_sum / num_rays if num_rays > 0 else 0
+    
+    return {
+        'irradiance_mW_cm2': irradiance_mW_cm2,
+        'power_mW': power_mW,
+        'num_rays_in_probe': int(num_rays_in_probe),
+        'probe_area_cm2': probe_area_cm2
     }
 
 
